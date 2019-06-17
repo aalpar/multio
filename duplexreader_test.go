@@ -23,7 +23,7 @@
 package multio
 
 import (
-	"bytes"
+	"errors"
 	"io"
 	"io/ioutil"
 	"math/rand"
@@ -102,14 +102,22 @@ func TestReaderBasicShort(t *testing.T) {
 	}
 
 	n, err = r0.Read(bs)
-	if err != io.EOF {
+	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 	if n != 1 {
-		t.Fatalf("unexpected value: %d", n)
+		t.Fatalf("unexpected value")
 	}
 	if string(bs[:n]) != "m" {
 		t.Fatalf("unexpected value")
+	}
+
+	n, err = r0.Read(bs)
+	if n != 0 {
+		t.Fatalf("unexpected value")
+	}
+	if err != io.EOF {
+		t.Fatalf("err: %v", err)
 	}
 
 }
@@ -165,25 +173,41 @@ func TestReaderMiultiShort(t *testing.T) {
 	}
 
 	n, err = r1.Read(bs)
-	if err != io.EOF {
-		t.Fatalf("err: %v", err)
+	if err != nil {
+		t.Fatalf("unexpected value")
 	}
 	if n != 1 {
+		t.Fatalf("unexpected value")
+	}
+	if string(bs[:n]) != "m" {
+		t.Fatalf("unexpected value")
+	}
+
+	n, err = r1.Read(bs)
+	if n != 0 {
+		t.Fatalf("unexpected value")
+	}
+	if err != io.EOF {
+		t.Fatalf("unexpected value")
+	}
+
+	n, err = r0.Read(bs)
+	if n != 1 {
 		t.Fatalf("unexpected value: %d", n)
+	}
+	if err != nil {
+		t.Fatalf("err: %v", err)
 	}
 	if string(bs[:n]) != "m" {
 		t.Fatalf("unexpected value")
 	}
 
 	n, err = r0.Read(bs)
-	if err != io.EOF {
-		t.Fatalf("err: %v", err)
-	}
-	if n != 1 {
+	if n != 0 {
 		t.Fatalf("unexpected value: %d", n)
 	}
-	if string(bs[:n]) != "m" {
-		t.Fatalf("unexpected value")
+	if err != io.EOF {
+		t.Fatalf("err: %v", err)
 	}
 
 	n, err = r1.Read(bs)
@@ -255,7 +279,26 @@ func TestReaderMiultiShort2(t *testing.T) {
 	}
 
 	n, err = r1.Read(bs)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("unexpected value: %d", n)
+	}
+	if string(bs[:n]) != "m" {
+		t.Fatalf("unexpected value")
+	}
+
+	n, err = r1.Read(bs)
 	if err != io.EOF {
+		t.Fatalf("err: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("unexpected value: %d", n)
+	}
+
+	n, err = r0.Read(bs)
+	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 	if n != 1 {
@@ -269,11 +312,8 @@ func TestReaderMiultiShort2(t *testing.T) {
 	if err != io.EOF {
 		t.Fatalf("err: %v", err)
 	}
-	if n != 1 {
+	if n != 0 {
 		t.Fatalf("unexpected value: %d", n)
-	}
-	if string(bs[:n]) != "m" {
-		t.Fatalf("unexpected value")
 	}
 
 	n, err = r1.Read(bs)
@@ -346,7 +386,7 @@ func TestReaderMiultiShortFile(t *testing.T) {
 	}
 
 	n, err = r1.Read(bs)
-	if err != io.EOF {
+	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 	if n != 2 {
@@ -356,8 +396,16 @@ func TestReaderMiultiShortFile(t *testing.T) {
 		t.Fatalf("unexpected value: %q", bs[:n])
 	}
 
-	n, err = r0.Read(bs)
+	n, err = r1.Read(bs)
 	if err != io.EOF {
+		t.Fatalf("err: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("unexpected value: %d", n)
+	}
+
+	n, err = r0.Read(bs)
+	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 	if n != 2 {
@@ -365,6 +413,14 @@ func TestReaderMiultiShortFile(t *testing.T) {
 	}
 	if string(bs[:n]) != "m\n" {
 		t.Fatalf("unexpected value")
+	}
+
+	n, err = r0.Read(bs)
+	if err != io.EOF {
+		t.Fatalf("err: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("unexpected value: %d", n)
 	}
 
 	n, err = r1.Read(bs)
@@ -415,7 +471,16 @@ func TestReaderClose(t *testing.T) {
 		t.Fatalf("unexpected value")
 	}
 
-	r0.Close()
+	err = r0.Close()
+
+	if err != nil {
+		t.Fatalf("unexpected value")
+	}
+
+	_, err = r0.Read(bs)
+	if err != ErrClosedMultiReader {
+		t.Fatalf("unexpected value")
+	}
 
 	n, err = r1.Read(bs)
 	if err != nil {
@@ -441,9 +506,61 @@ func TestReaderClose(t *testing.T) {
 		t.Fatalf("unexpected value: %q", string(bs))
 	}
 
-	n, err = r0.Read(bs)
+	err = r1.Close()
+
+	if err != nil {
+		t.Fatalf("unexpected value")
+	}
+
+	_, err = r1.Read(bs)
 	if err != ErrClosedMultiReader {
+		t.Fatalf("unexpected value")
+	}
+
+}
+
+func TestReaderCloseWithError(t *testing.T) {
+	mr := NewDuplexMultiReaderWithSize(strings.NewReader(LONG_GREEK), 10)
+	r0 := mr.NewReader()
+	r1 := mr.NewReader()
+	bs := make([]byte, 5)
+
+	n, err := r0.Read(bs)
+	if err != nil {
 		t.Fatalf("err: %v", err)
+	}
+	if string(bs[:n]) != "Lorem" {
+		t.Fatalf("unexpected value")
+	}
+
+	err = r0.CloseWithError(errors.New("testing 0"))
+
+	if err == nil || err.Error() != "testing 0" {
+		t.Fatalf("unexpected value")
+	}
+
+	_, err = r0.Read(bs)
+	if err == nil || err.Error() != "testing 0" {
+		t.Fatalf("unexpected value")
+	}
+
+	n, err = r1.Read(bs)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if string(bs[:n]) != "Lorem" {
+		t.Fatalf("unexpected value")
+	}
+
+	err = r1.CloseWithError(errors.New("testing 1"))
+
+	if err == nil || err.Error() != "testing 1" {
+		t.Fatalf("unexpected value")
+	}
+
+	_, err = r1.Read(bs)
+	if err == nil || err.Error() != "testing 1" {
+		t.Fatalf("unexpected value")
 	}
 
 }
@@ -495,19 +612,17 @@ func TestReaderMiultiLopsided(t *testing.T) {
 
 func TestReaderParallel(t *testing.T) {
 
-	BN := 2 << 27 // 128mb
+	BN := int64(1) << uint64(30) // 1GB max
 
 	r := rand.New(rand.NewSource(time.Now().Unix()))
 	mr := NewDuplexMultiReader(r)
 
-	N := 80
+	N := 5
 
 	rss := make([]*DuplexReader, N)
-	bss := make([]*bytes.Buffer, N)
 
 	for i := 0; i < N; i++ {
 		rss[i] = mr.NewReader()
-		bss[i] = &bytes.Buffer{}
 	}
 
 	wg := sync.WaitGroup{}
@@ -518,13 +633,17 @@ func TestReaderParallel(t *testing.T) {
 
 		go func(j int) {
 			defer func() { rss[j].Close(); wg.Done() }()
-			q := r.Int63n(int64(BN))
+			q := r.Int63n(BN)
 			var nn int
 			var err error
 			var n int64
-			bs := make([]byte, q)
+			bs := make([]byte, 1<<15)
 			for err == nil && n < q {
-				nn, err = rss[j].Read(bs[n:])
+				l := int64(len(bs))
+				if q-n < l {
+					l = q - n
+				}
+				nn, err = rss[j].Read(bs[:l])
 				if nn == 0 && err == nil {
 					t.Fatalf("unexpected value")
 				}
@@ -542,38 +661,15 @@ func TestReaderParallel(t *testing.T) {
 
 	wg.Wait()
 
-	li := 0
-	for i := 1; i < N; i++ {
-		l := len(bss[i].Bytes())
-		if l > len(bss[li].Bytes()) {
-			li = i
-		}
-	}
-
-	bs0 := bss[li].Bytes()
-	for i := 0; i < N; i++ {
-		bs1 := bss[i].Bytes()
-		l := len(bs1)
-		for j := 0; j < l; j++ {
-			if bs0[j] != bs1[j] {
-				t.Logf("len(bs0) = %d", len(bs0))
-				t.Logf("len(bs1) = %d", len(bs1))
-				t.Logf("bs0 = %v", bs0[:j+1])
-				t.Logf("bs1 = %v", bs1[:j+1])
-				t.Fatalf("unexpected value: %d", j)
-			}
-		}
-	}
-
 }
 
 func BenchmarkRead(b *testing.B) {
 
-	GiB := 1 << 24
+	MiB := 1 << 20
 
 	r := rand.New(rand.NewSource(time.Now().Unix()))
 	rs := make([]io.Reader, b.N)
-	bs := make([]byte, GiB)
+	bs := make([]byte, MiB*16)
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -585,7 +681,7 @@ func BenchmarkRead(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		n := 0
-		for n < GiB {
+		for n < (MiB * 16) {
 			p, err := rs[i].Read(bs[n:])
 			n += p
 			if err != nil {

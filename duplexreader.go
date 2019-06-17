@@ -64,10 +64,11 @@ func NewDuplexMultiReaderWithSize(r io.Reader, size int) *DuplexMultiReader {
 }
 
 type DuplexReader struct {
-	mr  *DuplexMultiReader
-	c   chan entry
-	buf []byte
-	err error
+	mr     *DuplexMultiReader
+	c      chan entry
+	buf    []byte
+	closed bool
+	err    error
 }
 
 // NewReader create a new reader from the MultiDuplexReader
@@ -89,20 +90,32 @@ func (mr *DuplexMultiReader) NewReaderWithLength(length int) *DuplexReader {
 }
 
 func (r *DuplexReader) Close() error {
+	return r.CloseWithError(nil)
+}
+
+func (r *DuplexReader) CloseWithError(err error) error {
 	mr := r.mr
 	close(r.c)
 	mr.mtx.Lock()
+	defer mr.mtx.Unlock()
 	delete(mr.cs, r.c)
-	r.c = nil
+	r.closed = true
 	r.buf = nil
-	mr.mtx.Unlock()
-	return nil
+	r.err = err
+	if err == nil {
+		r.err = ErrClosedMultiReader
+		return nil
+	}
+	return err
 }
 
 // Read fulfills the io.Reader interface
 func (r *DuplexReader) Read(bs []byte) (nn int, err error) {
 	l := len(r.buf)
 	if l == 0 {
+		if r.err != nil {
+			return l, r.err
+		}
 		var ent entry
 		select {
 		// channel is non-nil and has a buffer on it - read it
@@ -114,9 +127,9 @@ func (r *DuplexReader) Read(bs []byte) (nn int, err error) {
 			brs := make([]byte, mr.blocksize)
 			nn = 0
 			mr.mtx.Lock()
-			if r.c == nil {
+			if r.closed {
 				mr.mtx.Unlock()
-				return 0, ErrClosedMultiReader
+				return 0, r.err
 			}
 			// fill the buffer until error or blocksize
 			for nn < mr.blocksize && err == nil {
@@ -129,7 +142,6 @@ func (r *DuplexReader) Read(bs []byte) (nn int, err error) {
 			// distribute the new buffer and error to all the other readers
 			for _, c := range mr.cs {
 				func() {
-					// only panic here is a closed channel which will be ignored
 					defer func() { recover() }()
 					c <- entry{
 						bs:  brs,
@@ -141,7 +153,6 @@ func (r *DuplexReader) Read(bs []byte) (nn int, err error) {
 			// empty entry here when channel is closed
 			ent, _ = <-r.c
 		}
-		// set the local buffer
 		r.buf = ent.bs
 		r.err = ent.err
 	}
@@ -149,8 +160,5 @@ func (r *DuplexReader) Read(bs []byte) (nn int, err error) {
 	// return error associated with the buffer only after the last read
 	nn = copy(bs, r.buf)
 	r.buf = r.buf[nn:]
-	if len(r.buf) == 0 {
-		return nn, r.err
-	}
 	return nn, nil
 }
