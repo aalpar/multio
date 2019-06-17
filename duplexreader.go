@@ -23,6 +23,7 @@
 package multio
 
 import (
+	"errors"
 	"io"
 	"sync"
 )
@@ -32,16 +33,34 @@ const (
 	CHANNEL_LENGTH = 1 << 10
 )
 
+var ErrClosedMultiReader = errors.New("closed multireader")
+
 type entry struct {
 	err error
 	bs  []byte
 }
 
+// DuplexMultiReader is a structure that allows multiple readers to all read the same data from a single reader.
 type DuplexMultiReader struct {
 	blocksize int
 	rdr       io.Reader
 	mtx       sync.Mutex
-	cs        []chan entry
+	cs        map[chan entry]chan entry
+}
+
+// NewDuplexMultiReader create a reader than fans reads to many readers.
+func NewDuplexMultiReader(r io.Reader) *DuplexMultiReader {
+	return NewDuplexMultiReaderWithSize(r, BLOCK_SIZE)
+}
+
+// NewDuplexMultiReaderWithSize create a reader than fans read data to many readers.  Size specifies the size of the read buffer.
+func NewDuplexMultiReaderWithSize(r io.Reader, size int) *DuplexMultiReader {
+	q := &DuplexMultiReader{
+		blocksize: size,
+		rdr:       r,
+		cs:        map[chan entry]chan entry{},
+	}
+	return q
 }
 
 type DuplexReader struct {
@@ -49,21 +68,6 @@ type DuplexReader struct {
 	c   chan entry
 	buf []byte
 	err error
-}
-
-// NewDuplexReader create a reader than fans read results out between many readers
-func NewDuplexMultiReader(r io.Reader) *DuplexMultiReader {
-	return NewDuplexMultiReaderWithSize(r, BLOCK_SIZE)
-}
-
-// NewDuplexReaderWithSize create a reader than fans read results out between many readers.  size specifies the size of the read buffer.
-func NewDuplexMultiReaderWithSize(r io.Reader, size int) *DuplexMultiReader {
-	q := &DuplexMultiReader{
-		blocksize: size,
-		rdr:       r,
-		cs:        []chan entry{},
-	}
-	return q
 }
 
 // NewReader create a new reader from the MultiDuplexReader
@@ -80,31 +84,41 @@ func (mr *DuplexMultiReader) NewReaderWithLength(length int) *DuplexReader {
 	}
 	mr.mtx.Lock()
 	defer mr.mtx.Unlock()
-	mr.cs = append(mr.cs, q.c)
+	mr.cs[q.c] = q.c
 	return q
 }
 
-func (r *DuplexReader) HasMultiReader() bool {
-	return r.mr != nil
+func (r *DuplexReader) Close() error {
+	mr := r.mr
+	close(r.c)
+	mr.mtx.Lock()
+	delete(mr.cs, r.c)
+	r.c = nil
+	r.buf = nil
+	mr.mtx.Unlock()
+	return nil
 }
 
 // Read fulfills the io.Reader interface
 func (r *DuplexReader) Read(bs []byte) (nn int, err error) {
 	l := len(r.buf)
-	mr := r.mr
 	if l == 0 {
+		var ent entry
 		select {
-		case ent := <-r.c:
-			// simple ... buffer len == 0 so copy a buffer and error from
-			// the channel
-			r.buf = ent.bs
-			r.err = ent.err
+		// channel is non-nil and has a buffer on it - read it
+		case ent = <-r.c:
 		default:
 			// nothing available on channel so copy new bytes in from reader
-			// and redistribute to all other reader
-			mr.mtx.Lock()
+			// and redistribute to all other readers
+			mr := r.mr
 			brs := make([]byte, mr.blocksize)
 			nn = 0
+			mr.mtx.Lock()
+			if r.c == nil {
+				mr.mtx.Unlock()
+				return 0, ErrClosedMultiReader
+			}
+			// fill the buffer until error or blocksize
 			for nn < mr.blocksize && err == nil {
 				n := 0
 				n, err = mr.rdr.Read(brs[nn:])
@@ -114,20 +128,29 @@ func (r *DuplexReader) Read(bs []byte) (nn int, err error) {
 			// brs now has the new bytes and err is any error resulting from the last read
 			// distribute the new buffer and error to all the other readers
 			for _, c := range mr.cs {
-				if c != r.c {
+				func() {
+					// only panic here is a closed channel which will be ignored
+					defer func() { recover() }()
 					c <- entry{
 						bs:  brs,
 						err: err,
 					}
-				}
+				}()
 			}
 			mr.mtx.Unlock()
-			// set the local buffer
-			r.buf = brs
-			r.err = err
+			// empty entry here when channel is closed
+			ent, _ = <-r.c
 		}
+		// set the local buffer
+		r.buf = ent.bs
+		r.err = ent.err
 	}
+	// copy channel buffer to the read destination and move the channel buffer forward
+	// return error associated with the buffer only after the last read
 	nn = copy(bs, r.buf)
 	r.buf = r.buf[nn:]
-	return nn, r.err
+	if len(r.buf) == 0 {
+		return nn, r.err
+	}
+	return nn, nil
 }

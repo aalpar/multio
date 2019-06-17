@@ -23,9 +23,14 @@
 package multio
 
 import (
+	"bytes"
 	"io"
+	"io/ioutil"
 	"math/rand"
+	"os"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -199,21 +204,388 @@ func TestReaderMiultiShort(t *testing.T) {
 
 }
 
-func BenchmarkRead(b *testing.B) {
+func TestReaderMiultiShort2(t *testing.T) {
+	mr := NewDuplexMultiReaderWithSize(strings.NewReader(SHORT_GREEK), 2<<8)
+	r0 := mr.NewReader()
+	r1 := mr.NewReader()
+	bs := make([]byte, 5)
+
+	n, err := r0.Read(bs)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if n != 5 {
+		t.Fatalf("unexpected value")
+	}
+	if string(bs[:n]) != "Lorem" {
+		t.Fatalf("unexpected value")
+	}
+
+	n, err = r1.Read(bs)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if n != 5 {
+		t.Fatalf("unexpected value")
+	}
+	if string(bs[:n]) != "Lorem" {
+		t.Fatalf("unexpected value")
+	}
+
+	n, err = r1.Read(bs)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if n != 5 {
+		t.Fatalf("unexpected value")
+	}
+	if string(bs[:n]) != " ipsu" {
+		t.Fatalf("unexpected value")
+	}
+
+	n, err = r0.Read(bs)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if n != 5 {
+		t.Fatalf("unexpected value")
+	}
+	if string(bs[:n]) != " ipsu" {
+		t.Fatalf("unexpected value")
+	}
+
+	n, err = r1.Read(bs)
+	if err != io.EOF {
+		t.Fatalf("err: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("unexpected value: %d", n)
+	}
+	if string(bs[:n]) != "m" {
+		t.Fatalf("unexpected value")
+	}
+
+	n, err = r0.Read(bs)
+	if err != io.EOF {
+		t.Fatalf("err: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("unexpected value: %d", n)
+	}
+	if string(bs[:n]) != "m" {
+		t.Fatalf("unexpected value")
+	}
+
+	n, err = r1.Read(bs)
+	if err == nil {
+		t.Fatalf("unexpected value: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("unexpected value: %d", n)
+	}
+
+	n, err = r0.Read(bs)
+	if err == nil {
+		t.Fatalf("unexpected value: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("unexpected value: %d", n)
+	}
+
+}
+
+func TestReaderMiultiShortFile(t *testing.T) {
+	f, _ := os.Open("testdata/dat.txt")
+	mr := NewDuplexMultiReaderWithSize(f, 5)
+	r0 := mr.NewReader()
+	r1 := mr.NewReader()
+	bs := make([]byte, 10)
+
+	n, err := r0.Read(bs)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if n != 5 {
+		t.Fatalf("unexpected value")
+	}
+	if string(bs[:n]) != "Lorem" {
+		t.Fatalf("unexpected value")
+	}
+
+	n, err = r1.Read(bs)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if n != 5 {
+		t.Fatalf("unexpected value")
+	}
+	if string(bs[:n]) != "Lorem" {
+		t.Fatalf("unexpected value")
+	}
+
+	n, err = r1.Read(bs)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if n != 5 {
+		t.Fatalf("unexpected value")
+	}
+	if string(bs[:n]) != " ipsu" {
+		t.Fatalf("unexpected value")
+	}
+
+	n, err = r0.Read(bs)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if n != 5 {
+		t.Fatalf("unexpected value")
+	}
+	if string(bs[:n]) != " ipsu" {
+		t.Fatalf("unexpected value")
+	}
+
+	n, err = r1.Read(bs)
+	if err != io.EOF {
+		t.Fatalf("err: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("unexpected value: %d", n)
+	}
+	if string(bs[:n]) != "m\n" {
+		t.Fatalf("unexpected value: %q", bs[:n])
+	}
+
+	n, err = r0.Read(bs)
+	if err != io.EOF {
+		t.Fatalf("err: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("unexpected value: %d", n)
+	}
+	if string(bs[:n]) != "m\n" {
+		t.Fatalf("unexpected value")
+	}
+
+	n, err = r1.Read(bs)
+	if err == nil {
+		t.Fatalf("unexpected value: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("unexpected value: %d", n)
+	}
+
+	n, err = r0.Read(bs)
+	if err == nil {
+		t.Fatalf("unexpected value: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("unexpected value: %d", n)
+	}
+
+}
+
+func TestReaderClose(t *testing.T) {
+	mr := NewDuplexMultiReaderWithSize(strings.NewReader(LONG_GREEK), 10)
+	r0 := mr.NewReader()
+	r1 := mr.NewReader()
+	bs := make([]byte, 5)
+
+	n, err := r0.Read(bs)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if string(bs[:n]) != "Lorem" {
+		t.Fatalf("unexpected value")
+	}
+
+	n, err = r0.Read(bs)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if string(bs[:n]) != " ipsu" {
+		t.Fatalf("unexpected value")
+	}
+
+	n, err = r1.Read(bs)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if string(bs[:n]) != "Lorem" {
+		t.Fatalf("unexpected value")
+	}
+
+	r0.Close()
+
+	n, err = r1.Read(bs)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if string(bs[:n]) != " ipsu" {
+		t.Fatalf("unexpected value")
+	}
+
+	n, err = r1.Read(bs)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if string(bs[:n]) != "m dol" {
+		t.Fatalf("unexpected value")
+	}
+
+	n, err = r1.Read(bs)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if string(bs[:n]) != "or si" {
+		t.Fatalf("unexpected value: %q", string(bs))
+	}
+
+	n, err = r0.Read(bs)
+	if err != ErrClosedMultiReader {
+		t.Fatalf("err: %v", err)
+	}
+
+}
+
+func TestReaderMiultiLopsided(t *testing.T) {
+
 	r := rand.New(rand.NewSource(time.Now().Unix()))
-	bs := make([]byte, b.N)
-	rs := make([]*DuplexReader, b.N)
+	mr := NewDuplexMultiReaderWithSize(r, 10)
+
+	r0 := mr.NewReaderWithLength(3)
+	r1 := mr.NewReaderWithLength(3)
+
+	bs0 := make([]byte, 1<<10)
+	bs1 := make([]byte, 1<<10)
+
+	cn := sync.NewCond(&sync.Mutex{})
+
+	go func() {
+		n := 0
+		for i := 0; i < 4; i++ {
+			cn.L.Lock()
+			if i == 3 {
+				cn.Broadcast()
+			}
+			cn.L.Unlock()
+			p, err := r0.Read(bs0[n:])
+			n += p
+			if err != nil {
+				t.Fatalf("err: %v", err)
+			}
+		}
+	}()
+
+	cn.L.Lock()
+	cn.Wait()
+	nn, err := r1.Read(bs1)
+	cn.L.Unlock()
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if nn != 10 {
+		t.Fatalf("unexpected value: %d", nn)
+	}
+	if !reflect.DeepEqual(bs0[:nn], bs1[:nn]) {
+		t.Fatalf("unexpected value")
+	}
+
+}
+
+func TestReaderParallel(t *testing.T) {
+
+	BN := 2 << 27 // 128mb
+
+	r := rand.New(rand.NewSource(time.Now().Unix()))
+	mr := NewDuplexMultiReader(r)
+
+	N := 80
+
+	rss := make([]*DuplexReader, N)
+	bss := make([]*bytes.Buffer, N)
+
+	for i := 0; i < N; i++ {
+		rss[i] = mr.NewReader()
+		bss[i] = &bytes.Buffer{}
+	}
+
+	wg := sync.WaitGroup{}
+
+	for i := 0; i < N; i++ {
+
+		wg.Add(1)
+
+		go func(j int) {
+			defer func() { rss[j].Close(); wg.Done() }()
+			q := r.Int63n(int64(BN))
+			var nn int
+			var err error
+			var n int64
+			bs := make([]byte, q)
+			for err == nil && n < q {
+				nn, err = rss[j].Read(bs[n:])
+				if nn == 0 && err == nil {
+					t.Fatalf("unexpected value")
+				}
+				n += int64(nn)
+			}
+			if err != nil {
+				t.Fatalf("err: %v", err)
+			}
+			if int64(n) != q {
+				t.Fatalf("unexpected value")
+			}
+		}(i)
+
+	}
+
+	wg.Wait()
+
+	li := 0
+	for i := 1; i < N; i++ {
+		l := len(bss[i].Bytes())
+		if l > len(bss[li].Bytes()) {
+			li = i
+		}
+	}
+
+	bs0 := bss[li].Bytes()
+	for i := 0; i < N; i++ {
+		bs1 := bss[i].Bytes()
+		l := len(bs1)
+		for j := 0; j < l; j++ {
+			if bs0[j] != bs1[j] {
+				t.Logf("len(bs0) = %d", len(bs0))
+				t.Logf("len(bs1) = %d", len(bs1))
+				t.Logf("bs0 = %v", bs0[:j+1])
+				t.Logf("bs1 = %v", bs1[:j+1])
+				t.Fatalf("unexpected value: %d", j)
+			}
+		}
+	}
+
+}
+
+func BenchmarkRead(b *testing.B) {
+
+	GiB := 1 << 24
+
+	r := rand.New(rand.NewSource(time.Now().Unix()))
+	rs := make([]io.Reader, b.N)
+	bs := make([]byte, GiB)
+
 	b.ReportAllocs()
 	b.ResetTimer()
+
 	mr := NewDuplexMultiReader(r)
 	for i := 0; i < b.N; i++ {
 		rs[i] = mr.NewReader()
 	}
+
 	for i := 0; i < b.N; i++ {
 		n := 0
-		x := 0
-		for n < b.N {
-			x++
+		for n < GiB {
 			p, err := rs[i].Read(bs[n:])
 			n += p
 			if err != nil {
@@ -221,4 +593,31 @@ func BenchmarkRead(b *testing.B) {
 			}
 		}
 	}
+
+}
+
+func BenchmarkThreadedRead(b *testing.B) {
+
+	GiB := 1 << 30
+
+	r := rand.New(rand.NewSource(time.Now().Unix()))
+	rs := make([]io.Reader, b.N)
+
+	mr := NewDuplexMultiReader(r)
+	for i := 0; i < b.N; i++ {
+		rs[i] = mr.NewReader()
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		go func(j int) {
+			n, _ := io.CopyN(ioutil.Discard, rs[j], int64(GiB))
+			if int(n) != GiB {
+				b.Fatalf("unexpected value")
+			}
+		}(i)
+	}
+
 }
