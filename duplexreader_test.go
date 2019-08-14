@@ -44,8 +44,8 @@ Penatibus vulputate, eget purus massa nonummy cras ante, in dignissim mauris nat
 Sed mus placerat sagittis ac, pellentesque tellus vitae elementum, non non nisl magna. Volutpat luctus aliquet nisl tortor, etiam libero, id et posuere ut congue dignissim suspendisse. Vel dui vel mattis praesent, in morbi accumsan nascetur ipsum, euismod ac duis semper vel dolor non, possimus viverra mauris wisi nec nec. Maecenas eleifend tortor mollis commodo, felis praesent doloribus. Est cum. Modi cras morbi, suspendisse pellentesque eget nullam ut nam. Parturient proin ornare ante nec lacus, magna vestibulum lorem condimentum, id aenean lectus. Tortor ante mauris est vehicula, ante pede rutrum orci malesuada, nunc vehicula rhoncus aliquam aliquam hac luctus. Ultricies augue id morbi convallis dolor.`
 )
 
-func TestNewDuplexMultiReader(t *testing.T) {
-	mr := NewDuplexMultiReader(strings.NewReader(SHORT_GREEK))
+func TestNewMultiplexReader(t *testing.T) {
+	mr := NewMultiplexReader(strings.NewReader(SHORT_GREEK))
 	r0 := mr.NewReader()
 	if mr.cs == nil {
 		t.Fatalf("unexpected value")
@@ -75,7 +75,7 @@ func TestNewDuplexMultiReader(t *testing.T) {
 }
 
 func TestReaderBasicShort(t *testing.T) {
-	mr := NewDuplexMultiReaderWithSize(strings.NewReader(SHORT_GREEK), 5)
+	mr := NewMultiplexReaderWithSize(strings.NewReader(SHORT_GREEK), 5)
 	r0 := mr.NewReader()
 	bs := make([]byte, 10)
 
@@ -123,7 +123,7 @@ func TestReaderBasicShort(t *testing.T) {
 }
 
 func TestReaderMiultiShort(t *testing.T) {
-	mr := NewDuplexMultiReaderWithSize(strings.NewReader(SHORT_GREEK), 5)
+	mr := NewMultiplexReaderWithSize(strings.NewReader(SHORT_GREEK), 5)
 	r0 := mr.NewReader()
 	r1 := mr.NewReader()
 	bs := make([]byte, 10)
@@ -229,7 +229,7 @@ func TestReaderMiultiShort(t *testing.T) {
 }
 
 func TestReaderMiultiShort2(t *testing.T) {
-	mr := NewDuplexMultiReaderWithSize(strings.NewReader(SHORT_GREEK), 2<<8)
+	mr := NewMultiplexReaderWithSize(strings.NewReader(SHORT_GREEK), 2<<8)
 	r0 := mr.NewReader()
 	r1 := mr.NewReader()
 	bs := make([]byte, 5)
@@ -336,7 +336,7 @@ func TestReaderMiultiShort2(t *testing.T) {
 
 func TestReaderMiultiShortFile(t *testing.T) {
 	f, _ := os.Open("testdata/dat.txt")
-	mr := NewDuplexMultiReaderWithSize(f, 5)
+	mr := NewMultiplexReaderWithSize(f, 5)
 	r0 := mr.NewReader()
 	r1 := mr.NewReader()
 	bs := make([]byte, 10)
@@ -442,7 +442,7 @@ func TestReaderMiultiShortFile(t *testing.T) {
 }
 
 func TestReaderClose(t *testing.T) {
-	mr := NewDuplexMultiReaderWithSize(strings.NewReader(LONG_GREEK), 10)
+	mr := NewMultiplexReaderWithSize(strings.NewReader(LONG_GREEK), 10)
 	r0 := mr.NewReader()
 	r1 := mr.NewReader()
 	bs := make([]byte, 5)
@@ -478,7 +478,7 @@ func TestReaderClose(t *testing.T) {
 	}
 
 	_, err = r0.Read(bs)
-	if err != ErrClosedMultiReader {
+	if err != ErrClosedReader {
 		t.Fatalf("unexpected value")
 	}
 
@@ -513,14 +513,14 @@ func TestReaderClose(t *testing.T) {
 	}
 
 	_, err = r1.Read(bs)
-	if err != ErrClosedMultiReader {
+	if err != ErrClosedReader {
 		t.Fatalf("unexpected value")
 	}
 
 }
 
 func TestReaderCloseWithError(t *testing.T) {
-	mr := NewDuplexMultiReaderWithSize(strings.NewReader(LONG_GREEK), 10)
+	mr := NewMultiplexReaderWithSize(strings.NewReader(LONG_GREEK), 10)
 	r0 := mr.NewReader()
 	r1 := mr.NewReader()
 	bs := make([]byte, 5)
@@ -568,7 +568,7 @@ func TestReaderCloseWithError(t *testing.T) {
 func TestReaderMiultiLopsided(t *testing.T) {
 
 	r := rand.New(rand.NewSource(time.Now().Unix()))
-	mr := NewDuplexMultiReaderWithSize(r, 10)
+	mr := NewMultiplexReaderWithSize(r, 10)
 
 	r0 := mr.NewReaderWithLength(3)
 	r1 := mr.NewReaderWithLength(3)
@@ -615,11 +615,11 @@ func TestReaderParallel(t *testing.T) {
 	BN := int64(1) << uint64(30) // 1GB max
 
 	r := rand.New(rand.NewSource(time.Now().Unix()))
-	mr := NewDuplexMultiReader(r)
+	mr := NewMultiplexReader(r)
 
 	N := 5
 
-	rss := make([]*DuplexReader, N)
+	rss := make([]*Reader, N)
 
 	for i := 0; i < N; i++ {
 		rss[i] = mr.NewReader()
@@ -674,7 +674,7 @@ func BenchmarkRead(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 
-	mr := NewDuplexMultiReader(r)
+	mr := NewMultiplexReader(r)
 	for i := 0; i < b.N; i++ {
 		rs[i] = mr.NewReader()
 	}
@@ -694,12 +694,13 @@ func BenchmarkRead(b *testing.B) {
 
 func BenchmarkThreadedRead(b *testing.B) {
 
-	GiB := 1 << 30
+	MiB := 1 << 20
+	NB := MiB * 16
 
-	r := rand.New(rand.NewSource(time.Now().Unix()))
-	rs := make([]io.Reader, b.N)
+	r := io.LimitReader(rand.New(rand.NewSource(time.Now().Unix())), int64(NB))
+	rs := make([]io.ReadCloser, b.N)
 
-	mr := NewDuplexMultiReader(r)
+	mr := NewMultiplexReader(r)
 	for i := 0; i < b.N; i++ {
 		rs[i] = mr.NewReader()
 	}
@@ -707,11 +708,22 @@ func BenchmarkThreadedRead(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 
+	wg := sync.WaitGroup{}
+
 	for i := 0; i < b.N; i++ {
+		wg.Add(1)
 		go func(j int) {
-			n, _ := io.CopyN(ioutil.Discard, rs[j], int64(GiB))
-			if int(n) != GiB {
+			defer wg.Done()
+			n, err := io.Copy(ioutil.Discard, rs[j])
+			if int(n) != NB {
 				b.Fatalf("unexpected value")
+			}
+			if err != nil {
+				b.Fatalf("err: %v", err)
+			}
+			err = rs[j].Close()
+			if err != nil {
+				b.Fatalf("err: %v", err)
 			}
 		}(i)
 	}

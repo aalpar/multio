@@ -35,7 +35,7 @@ import (
 func Example() {
 
 	r := rand.New(rand.NewSource(time.Now().Unix()))
-	rdr := NewDuplexMultiReader(io.LimitReader(r, 1<<30))
+	rdr := NewMultiplexReader(io.LimitReader(r, 1<<30))
 
 	f0, err := os.Create("example1.dat")
 	if err != nil {
