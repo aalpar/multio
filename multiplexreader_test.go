@@ -24,6 +24,8 @@ package multio
 
 import (
 	"errors"
+	"hash"
+	"hash/crc64"
 	"io"
 	"io/ioutil"
 	"math/rand"
@@ -610,7 +612,151 @@ func TestReaderMiultiLopsided(t *testing.T) {
 
 }
 
-func TestReaderParallel(t *testing.T) {
+// test for sink stream checksum match
+func TestReaderParallel1(t *testing.T) {
+
+	BN := int64(1 << 32) // 4GB
+
+	r := rand.New(rand.NewSource(time.Now().Unix()))
+	mr := NewMultiplexReader(r)
+
+	N := 16
+
+	rss := make([]*Reader, N)
+	hss := make([]hash.Hash64, N)
+
+	for i := 0; i < N; i++ {
+		rss[i] = mr.NewReaderWithLength(1)
+		hss[i] = crc64.New(crc64.MakeTable(crc64.ISO))
+	}
+
+	wg := sync.WaitGroup{}
+
+	for i := 0; i < N; i++ {
+
+		wg.Add(1)
+
+		go func(j int) {
+			defer func() {
+				rss[j].Close()
+				wg.Done()
+			}()
+			q := BN
+			var nn int
+			var err error
+			var n int64
+			// use varied buffer sizes so that number of reads will not be uniform
+			bs := make([]byte, (j*1024)+512)
+			for err == nil && n < BN {
+				l := int64(len(bs))
+				if BN-n < l {
+					l = q - n
+				}
+				nn, err = rss[j].Read(bs[:l])
+				if nn == 0 && err == nil {
+					t.Fatalf("unexpected value")
+				}
+				hss[j].Write(bs[:nn])
+				n += int64(nn)
+			}
+			if err != nil {
+				t.Fatalf("err: %v", err)
+			}
+			if int64(n) != BN {
+				t.Fatalf("unexpected value")
+			}
+		}(i)
+
+	}
+
+	wg.Wait()
+
+	if len(hss) == 0 {
+		return
+	}
+	sm := hss[0].Sum64()
+	for i := 1; i < len(hss); i++ {
+		if sm != hss[i].Sum64() {
+			t.Fatalf("unexpected value")
+		}
+	}
+	t.Logf("sums match %d", sm)
+
+}
+
+// test for sink stream checksum match
+func TestReaderParallelN(t *testing.T) {
+
+	BN := int64(1 << 32) // 4GB
+
+	r := rand.New(rand.NewSource(time.Now().Unix()))
+	mr := NewMultiplexReader(r)
+
+	N := 16
+
+	rss := make([]*Reader, N)
+	hss := make([]hash.Hash64, N)
+
+	for i := 0; i < N; i++ {
+		rss[i] = mr.NewReader()
+		hss[i] = crc64.New(crc64.MakeTable(crc64.ISO))
+	}
+
+	wg := sync.WaitGroup{}
+
+	for i := 0; i < N; i++ {
+
+		wg.Add(1)
+
+		go func(j int) {
+			defer func() {
+				rss[j].Close()
+				wg.Done()
+			}()
+			q := BN
+			var nn int
+			var err error
+			var n int64
+			// use varied buffer sizes so that number of reads will not be uniform
+			bs := make([]byte, (j*1024)+512)
+			for err == nil && n < BN {
+				l := int64(len(bs))
+				if BN-n < l {
+					l = q - n
+				}
+				nn, err = rss[j].Read(bs[:l])
+				if nn == 0 && err == nil {
+					t.Fatalf("unexpected value")
+				}
+				hss[j].Write(bs[:nn])
+				n += int64(nn)
+			}
+			if err != nil {
+				t.Fatalf("err: %v", err)
+			}
+			if int64(n) != BN {
+				t.Fatalf("unexpected value")
+			}
+		}(i)
+
+	}
+
+	wg.Wait()
+
+	if len(hss) == 0 {
+		return
+	}
+	sm := hss[0].Sum64()
+	for i := 1; i < len(hss); i++ {
+		if sm != hss[i].Sum64() {
+			t.Fatalf("unexpected value")
+		}
+	}
+	t.Logf("sums match %d", sm)
+
+}
+
+func TestReaderParallelBufferSizes(t *testing.T) {
 
 	BN := int64(1) << uint64(30) // 1GB max
 
@@ -632,12 +778,18 @@ func TestReaderParallel(t *testing.T) {
 		wg.Add(1)
 
 		go func(j int) {
-			defer func() { rss[j].Close(); wg.Done() }()
+			defer func() {
+				rss[j].Close()
+				wg.Done()
+			}()
+			// read a random number of bytes from the stream
+			// and then close the stream
 			q := r.Int63n(BN)
 			var nn int
 			var err error
 			var n int64
-			bs := make([]byte, 1<<15)
+			// vary buffer sizes per thread
+			bs := make([]byte, 512+(j*512))
 			for err == nil && n < q {
 				l := int64(len(bs))
 				if q-n < l {
@@ -668,7 +820,7 @@ func BenchmarkRead(b *testing.B) {
 	MiB := 1 << 20
 
 	r := rand.New(rand.NewSource(time.Now().Unix()))
-	rs := make([]io.Reader, b.N)
+	rs := make([]io.ReadCloser, b.N)
 	bs := make([]byte, MiB*16)
 
 	b.ReportAllocs()
@@ -688,6 +840,7 @@ func BenchmarkRead(b *testing.B) {
 				b.Fatal(err)
 			}
 		}
+		rs[i].Close()
 	}
 
 }
@@ -716,16 +869,21 @@ func BenchmarkThreadedRead(b *testing.B) {
 			defer wg.Done()
 			n, err := io.Copy(ioutil.Discard, rs[j])
 			if int(n) != NB {
+				// copy entire limit reader
 				b.Fatalf("unexpected value")
 			}
 			if err != nil {
+				// no reason for errors since copy deals with io.EOF
 				b.Fatalf("err: %v", err)
 			}
 			err = rs[j].Close()
 			if err != nil {
+				// there should be no error on close
 				b.Fatalf("err: %v", err)
 			}
 		}(i)
 	}
+
+	wg.Wait()
 
 }
