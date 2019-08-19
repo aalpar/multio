@@ -39,11 +39,11 @@ func Example() {
 
 	f0, err := os.Create("example1.dat")
 	if err != nil {
-		log.Fatalf("err: %v", err)
+		log.Fatalf("err: %v\n", err)
 	}
 	f1, err := os.Create("example2.dat")
 	if err != nil {
-		log.Fatalf("err: %v", err)
+		log.Fatalf("err: %v\n", err)
 	}
 
 	// all readers must be created before first read
@@ -57,7 +57,7 @@ func Example() {
 		n, err := io.Copy(f0, rdr0)
 		fmt.Printf("copied %d\n", n)
 		if err != nil {
-			log.Fatalf("err: %v", err)
+			log.Fatalf("err: %v\n", err)
 		}
 		wg.Done()
 	}()
@@ -66,7 +66,7 @@ func Example() {
 		n, err := io.Copy(f1, rdr1)
 		fmt.Printf("copied %d\n", n)
 		if err != nil {
-			log.Fatalf("err: %v", err)
+			log.Fatalf("err: %v\n", err)
 		}
 		wg.Done()
 	}()
