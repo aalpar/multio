@@ -757,7 +757,8 @@ func TestReaderMiultiLopsided(t *testing.T) {
 // test for sink stream checksum match
 func TestReaderParallel1(t *testing.T) {
 
-	BN := int64(1 << 32) // 4GB
+	// number of bytes
+	BN := 1 << 24 // 16MB
 
 	r := rand.New(rand.NewSource(time.Now().Unix()))
 	mr := NewMultiplexReader(r)
@@ -774,10 +775,12 @@ func TestReaderParallel1(t *testing.T) {
 
 	wg := sync.WaitGroup{}
 
+	// N readers reading from a random stream
 	for i := 0; i < N; i++ {
 
 		wg.Add(1)
 
+		// start each reader in parallel
 		go func(j int) {
 			defer func() {
 				rss[j].Close()
@@ -786,25 +789,27 @@ func TestReaderParallel1(t *testing.T) {
 			q := BN
 			var nn int
 			var err error
-			var n int64
+			var n int
 			// use varied buffer sizes so that number of reads will not be uniform
 			bs := make([]byte, (j*1024)+512)
 			for err == nil && n < BN {
-				l := int64(len(bs))
+				l := len(bs)
 				if BN-n < l {
 					l = q - n
 				}
+				// read from readers
 				nn, err = rss[j].Read(bs[:l])
 				if nn == 0 && err == nil {
 					t.Fatalf("unexpected value")
 				}
+				// write to hash
 				hss[j].Write(bs[:nn])
-				n += int64(nn)
+				n += nn
 			}
 			if err != nil {
 				t.Fatalf("err: %v", err)
 			}
-			if int64(n) != BN {
+			if n != BN {
 				t.Fatalf("unexpected value")
 			}
 		}(i)
@@ -816,6 +821,7 @@ func TestReaderParallel1(t *testing.T) {
 	if len(hss) == 0 {
 		return
 	}
+	// ensure all hashes are the same
 	sm := hss[0].Sum64()
 	for i := 1; i < len(hss); i++ {
 		if sm != hss[i].Sum64() {
@@ -828,7 +834,7 @@ func TestReaderParallel1(t *testing.T) {
 // test for sink stream checksum match
 func TestReaderParallelN(t *testing.T) {
 
-	BN := int64(1 << 32) // 4GB
+	BN := int64(1 << 24) // 16MB
 
 	r := rand.New(rand.NewSource(time.Now().Unix()))
 	mr := NewMultiplexReader(r)
@@ -898,7 +904,7 @@ func TestReaderParallelN(t *testing.T) {
 
 func TestReaderParallelBufferSizes(t *testing.T) {
 
-	BN := int64(1) << uint64(30) // 1GB max
+	BN := 1 << 24 // 16MB max
 
 	r := rand.New(rand.NewSource(time.Now().Unix()))
 	mr := NewMultiplexReader(r)
@@ -924,14 +930,14 @@ func TestReaderParallelBufferSizes(t *testing.T) {
 			}()
 			// read a random number of bytes from the stream
 			// and then close the stream
-			q := r.Int63n(BN)
+			q := r.Intn(BN)
 			var nn int
 			var err error
-			var n int64
+			var n int
 			// vary buffer sizes per thread
 			bs := make([]byte, 512+(j*512))
 			for err == nil && n < q {
-				l := int64(len(bs))
+				l := len(bs)
 				if q-n < l {
 					l = q - n
 				}
@@ -939,12 +945,12 @@ func TestReaderParallelBufferSizes(t *testing.T) {
 				if nn == 0 && err == nil {
 					t.Fatalf("unexpected value")
 				}
-				n += int64(nn)
+				n += nn
 			}
 			if err != nil {
 				t.Fatalf("err: %v", err)
 			}
-			if int64(n) != q {
+			if n != q {
 				t.Fatalf("unexpected value")
 			}
 		}(i)

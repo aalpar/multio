@@ -88,7 +88,6 @@ func NewMultiplexReaderWithSize(r io.Reader, sizeB int) *MultiplexReader {
 type Reader struct {
 	mr     *MultiplexReader
 	baseBi int64
-	nextBi int64
 	c      chan entry
 	buf    []byte
 	closed bool
@@ -122,6 +121,12 @@ func (mr *MultiplexReader) NewReaderWithLength(length int) *Reader {
 // unblocks any calls blocked on this sink.
 func (r *Reader) Close() error {
 	return r.CloseWithError(nil)
+}
+
+// Len return the length of the channel.  Can be used to identify blocking
+// channels
+func (r *Reader) Len() int {
+	return len(r.c)
 }
 
 func (r *Reader) remove() {
@@ -215,7 +220,6 @@ func (r *Reader) read(coutfn func() (int, error)) (nn int, err error) {
 		nn, err = coutfn()
 		r.buf = r.buf[nn:]
 		r.baseBi += int64(nn)
-		r.nextBi = r.baseBi
 		return nn, err
 	}
 	var ent entry
@@ -251,6 +255,5 @@ func (r *Reader) read(coutfn func() (int, error)) (nn int, err error) {
 	nn, err = coutfn()
 	r.buf = r.buf[nn:]
 	r.baseBi += int64(nn)
-	r.nextBi = r.baseBi
 	return nn, err
 }
